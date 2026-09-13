@@ -1,13 +1,15 @@
 {
   "name": "development",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "LUMÉA cosmetics e-commerce website backend",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"No tests specified\""
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["lumea", "cosmetics", "ecommerce", "express", "mongodb"],
+  "author": "MAAZ ALI",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
