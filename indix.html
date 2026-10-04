@@ -2278,6 +2278,22 @@ footer{background:#050403!important;border-top:1px solid rgba(214,179,106,.14)}
       return String(a) === String(b);
     }
 
+    // Orders reference MongoDB products, so never send legacy browser-only IDs
+    // (for example "2") to an endpoint that expects an ObjectId.
+    function isMongoObjectId(id) {
+      return /^[a-f\d]{24}$/i.test(String(id || ""));
+    }
+
+    function removeStaleCartItems() {
+      const availableIds = new Set(products.map(product => String(product.id)));
+      const nextCart = cart.filter(item => availableIds.has(String(item.id)));
+
+      if (nextCart.length !== cart.length) {
+        cart = nextCart;
+        saveData();
+      }
+    }
+
     function jsArg(value) {
       return JSON.stringify(String(value));
     }
@@ -2497,7 +2513,7 @@ footer{background:#050403!important;border-top:1px solid rgba(214,179,106,.14)}
 
       const items = cart.map(item => {
 
-        const product = products.find(p => p.id === item.id);
+        const product = products.find(p => sameId(p.id, item.id));
 
         if (!product) return "";
 
@@ -2534,7 +2550,7 @@ footer{background:#050403!important;border-top:1px solid rgba(214,179,106,.14)}
 
       cart.forEach(item => {
 
-        const product = products.find(p => p.id === item.id);
+        const product = products.find(p => sameId(p.id, item.id));
 
         if (product) {
           total += product.price * item.qty;
@@ -2615,7 +2631,7 @@ function checkout() {
       total += Number(product.price) * qty;
 
       validItems.push({
-        productId: product.id,
+        productId: String(product.id),
         name: product.name,
         price: Number(product.price),
         quantity: qty,
@@ -2768,7 +2784,7 @@ async function placeOrder(event) {
     total += price * quantity;
 
     return {
-      productId: product.id,
+      productId: String(product.id),
       name: product.name,
       price: price,
       quantity: quantity,
@@ -3666,8 +3682,15 @@ async function placeOrder(event) {
 
       try {
         const response = await fetch("http://localhost:5000/api/orders", {
-          cache: "no-store"
+          cache: "no-store",
+          headers: adminHeaders()
         });
+
+        if (response.status === 401 || response.status === 403) {
+          sessionStorage.removeItem(ADMIN_SESSION_KEY);
+          stopAdminOrderNotifications();
+          return;
+        }
 
         const data = await response.json().catch(() => ({}));
 
@@ -3965,9 +3988,13 @@ async function placeOrder(event) {
         });
 
         if (freshResponse.ok) {
-          const freshProducts = await freshResponse.json().catch(() => null);
+          const freshData = await freshResponse.json().catch(() => null);
+          const freshProducts = Array.isArray(freshData)
+            ? freshData
+            : freshData?.products;
           if (Array.isArray(freshProducts)) {
             products = freshProducts.map(normalizeProduct);
+            removeStaleCartItems();
           }
         }
 
@@ -4269,10 +4296,40 @@ async function placeOrder(event) {
           throw new Error(`Server returned ${response.status}`);
         }
 
-        const serverProducts = await response.json();
+        const serverData = await response.json();
+        const serverProducts = Array.isArray(serverData)
+          ? serverData
+          : serverData?.products;
 
         if (Array.isArray(serverProducts) && serverProducts.length > 0) {
-          products = serverProducts.map(normalizeProduct);
+          const normalizedServerProducts = serverProducts.map(normalizeProduct);
+
+          // Migrate old browser-only numeric cart IDs to their MongoDB IDs.
+          // Old cart entries such as id "2" are matched against the old fallback
+          // product, then against the corresponding server product by name.
+          cart = cart.map(item => {
+            const oldId = String(item.id);
+            if (isMongoObjectId(oldId)) return item;
+
+            const legacyProduct = fallbackProducts.find(
+              p => sameId(p.id, oldId)
+            );
+
+            if (!legacyProduct) return item;
+
+            const serverProduct = normalizedServerProducts.find(
+              p => String(p.name).trim().toLowerCase() ===
+                   String(legacyProduct.name).trim().toLowerCase()
+            );
+
+            return serverProduct
+              ? { ...item, id: String(serverProduct.id) }
+              : item;
+          });
+
+          products = normalizedServerProducts;
+          removeStaleCartItems();
+          saveData();
         } else {
           // MongoDB is empty. Keep the local fallback visible; only an authenticated
           // admin can create products in the protected API.

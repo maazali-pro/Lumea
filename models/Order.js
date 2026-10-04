@@ -1,107 +1,117 @@
 const mongoose = require("mongoose");
 
-const orderItemSchema = new mongoose.Schema({
-  productId: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: true
-  },
+const orderItemSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      ref: "Product"
+    },
 
-  name: {
-    type: String,
-    required: true
-  },
-
-  price: {
-    type: Number,
-    required: true
-  },
-
-  quantity: {
-    type: Number,
-    required: true,
-    min: 1
-  },
-
-  image: {
-    type: String,
-    default: ""
-  }
-
-}, {
-  _id: false
-});
-
-
-const orderSchema = new mongoose.Schema({
-
-  orderId: {
-    type: String,
-    required: true,
-    unique: true
-  },
-
-  customer: {
     name: {
+      type: String,
+      default: ""
+    },
+
+    price: {
+      type: Number,
+      default: 0
+    },
+
+    quantity: {
+      type: Number,
+      default: 1,
+      min: 1
+    },
+
+    image: {
+      type: String,
+      default: ""
+    }
+  },
+  {
+    _id: false
+  }
+);
+
+const orderSchema = new mongoose.Schema(
+  {
+    orderId: {
       type: String,
       required: true,
       trim: true
     },
 
-    phone: {
-      type: String,
-      default: ""
+    customer: {
+      name: {
+        type: String,
+        required: true,
+        trim: true
+      },
+
+      phone: {
+        type: String,
+        required: true,
+        trim: true
+      },
+
+      address: {
+        type: String,
+        required: true,
+        trim: true
+      },
+
+      city: {
+        type: String,
+        required: true,
+        trim: true
+      }
     },
 
-    address: {
-      type: String,
-      default: ""
+    items: {
+      type: [orderItemSchema],
+      required: true,
+
+      validate: {
+        validator: function (value) {
+          return Array.isArray(value) && value.length > 0;
+        },
+
+        message: "Order must contain at least one item."
+      }
     },
 
-    city: {
+    total: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+
+    paymentMethod: {
       type: String,
-      default: ""
+      required: true,
+      trim: true
+    },
+
+    orderStatus: {
+      type: String,
+
+      enum: [
+        "Pending",
+        "Confirmed",
+        "Cancelled",
+        "Delivered"
+      ],
+
+      default: "Pending"
     }
   },
 
-  items: {
-    type: [orderItemSchema],
-    required: true
-  },
-
-  total: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-
-  paymentMethod: {
-    type: String,
-    enum: ["COD", "JAZZCASH", "EASYPAISA", "CARD"],
-    required: true
-  },
-
-  paymentStatus: {
-    type: String,
-    enum: ["Pending", "Paid", "Failed"],
-    default: "Pending"
-  },
-
-  orderStatus: {
-    type: String,
-    enum: [
-      "Pending",
-      "Confirmed",
-      "Processing",
-      "Shipped",
-      "Delivered",
-      "Cancelled"
-    ],
-    default: "Confirmed"
+  {
+    timestamps: true
   }
+);
 
-}, {
-  timestamps: true
-});
-
-
-module.exports = mongoose.model("Order", orderSchema);
+module.exports =
+  mongoose.models.Order ||
+  mongoose.model("Order", orderSchema);
