@@ -2792,8 +2792,9 @@ async function placeOrder(event) {
     };
   }).filter(Boolean);
 
-  if (!items.length || total <= 0) {
-    showToast("Your cart could not be processed.");
+  if (!items.length || total <= 0 || items.some(item => !isMongoObjectId(item.productId))) {
+    showToast("Please refresh the products and try again.");
+    await loadProductsFromServer();
     return;
   }
 
@@ -3172,9 +3173,9 @@ async function placeOrder(event) {
       try {
         const response = await fetch("http://localhost:5000/api/admin/login", {
           method: "POST",
-          headers: {
+          headers: adminHeaders({
             "Content-Type": "application/json"
-          },
+          }),
           body: JSON.stringify({ username, password })
         });
 
@@ -3918,6 +3919,12 @@ async function placeOrder(event) {
 
       const isEdit = id !== null && id !== undefined && String(id) !== "null";
 
+      if (isEdit && !isMongoObjectId(id)) {
+        showToast("Please refresh products first.");
+        await loadProductsFromServer();
+        return;
+      }
+
       if (!isEdit) {
         // Adding a product still uses the protected POST endpoint.
         if (!getAdminToken()) {
@@ -4291,57 +4298,48 @@ async function placeOrder(event) {
     async function loadProductsFromServer() {
       try {
         const response = await fetch(API_BASE_URL);
-
-        if (!response.ok) {
-          throw new Error(`Server returned ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
         const serverData = await response.json();
-        const serverProducts = Array.isArray(serverData)
-          ? serverData
-          : serverData?.products;
+        const serverProducts = Array.isArray(serverData) ? serverData : serverData?.products;
 
-        if (Array.isArray(serverProducts) && serverProducts.length > 0) {
+        if (!Array.isArray(serverProducts) || serverProducts.length === 0) {
+          // NEVER use numeric fallback IDs for real orders/updates.
+          // If admin is logged in, create the default products in MongoDB once.
+          if (getAdminToken()) {
+            const seeded = await seedDefaultProductsToServer();
+            products = seeded;
+          } else {
+            products = [];
+          }
+        } else {
           const normalizedServerProducts = serverProducts.map(normalizeProduct);
 
-          // Migrate old browser-only numeric cart IDs to their MongoDB IDs.
-          // Old cart entries such as id "2" are matched against the old fallback
-          // product, then against the corresponding server product by name.
+          // Convert old cart IDs (1,2,3...) to the matching MongoDB IDs.
           cart = cart.map(item => {
             const oldId = String(item.id);
             if (isMongoObjectId(oldId)) return item;
 
-            const legacyProduct = fallbackProducts.find(
-              p => sameId(p.id, oldId)
-            );
-
+            const legacyProduct = fallbackProducts.find(p => sameId(p.id, oldId));
             if (!legacyProduct) return item;
 
-            const serverProduct = normalizedServerProducts.find(
-              p => String(p.name).trim().toLowerCase() ===
-                   String(legacyProduct.name).trim().toLowerCase()
+            const serverProduct = normalizedServerProducts.find(p =>
+              String(p.name).trim().toLowerCase() === String(legacyProduct.name).trim().toLowerCase()
             );
 
-            return serverProduct
-              ? { ...item, id: String(serverProduct.id) }
-              : item;
+            return serverProduct ? { ...item, id: String(serverProduct.id) } : item;
           });
 
           products = normalizedServerProducts;
           removeStaleCartItems();
           saveData();
-        } else {
-          // MongoDB is empty. Keep the local fallback visible; only an authenticated
-          // admin can create products in the protected API.
-          products = fallbackProducts;
         }
 
         renderProducts();
         updateBadges();
-
       } catch (error) {
         console.error("Products loading error:", error);
-        products = fallbackProducts;
+        products = [];
         renderProducts();
         updateBadges();
       }
